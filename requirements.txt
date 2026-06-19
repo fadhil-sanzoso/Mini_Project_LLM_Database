@@ -1,18 +1,6 @@
-gdown==5.2.0
-SQLAlchemy==2.0.*
-psycopg2-binary==2.9.*
+SQLAlchemy>=2.0.0
+psycopg2-binary>=2.9.0
 pandas
 matplotlib
 google-generativeai
 streamlit
-pyngrok
-
-%%writefile .gitignore
-__pycache__/
-*.pyc
-*.log
-*.ipynb_checkpoints/
-data/
-.streamlit/secrets.toml
-ngrok.log
-
