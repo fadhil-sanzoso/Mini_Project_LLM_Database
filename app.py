@@ -4,19 +4,37 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sqlalchemy import create_engine, text
 import google.generativeai as genai
+from groq import Groq # Import Groq client
 
-# --- Configuration ---
-# You need to set GEMINI_API_KEY in Streamlit secrets
+# --- Configuration --- General LLM setup
+# You need to set GEMINI_API_KEY and GROQ_API_KEY in Streamlit secrets
 # Go to your Streamlit app -> left sidebar -> Settings -> App secrets
 # Add GEMINI_API_KEY = "YOUR_API_KEY"
-if "GEMINI_API_KEY" not in st.secrets:
-    st.error("GEMINI_API_KEY not found in Streamlit secrets. Please add it.")
+# Add GROQ_API_KEY = "YOUR_API_KEY"
+
+# --- LLM Provider Selection ---
+# Choose your desired LLM provider here. This can be made a Streamlit input later if needed.
+LLM_PROVIDER = "GROQ" # Set to "GEMINI" or "GROQ"
+
+GEMINI_API_KEY = None
+GROQ_API_KEY = None
+
+if LLM_PROVIDER == "GEMINI":
+    if "GEMINI_API_KEY" not in st.secrets:
+        st.error("GEMINI_API_KEY not found in Streamlit secrets. Please add it.")
+        st.stop()
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+    MODEL_NAME_GEMINI = "gemini-2.5-flash-lite"  # Or your preferred Gemini model
+    genai.configure(api_key=GEMINI_API_KEY)
+elif LLM_PROVIDER == "GROQ":
+    if "GROQ_API_KEY" not in st.secrets:
+        st.error("GROQ_API_KEY not found in Streamlit secrets. Please add it.")
+        st.stop()
+    GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+    GROQ_MODEL_NAME = "llama-3.3-70b-versatile" # Or your preferred Groq model
+else:
+    st.error("Invalid LLM_PROVIDER. Choose 'GEMINI' or 'GROQ'.")
     st.stop()
-
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-MODEL_NAME = "gemini-flash-latest"
-
-genai.configure(api_key=GEMINI_API_KEY)
 
 # --- Database Schema and Forbidden Keywords ---
 SCHEMA_STR = """employees(nip, nama, divisi, jabatan, join_date)
@@ -32,19 +50,18 @@ FORBIDDEN = ["drop", "delete", "update", "insert", "alter", "truncate", "create"
 
 # --- Initialize LLM and Database Engine (cached) ---
 @st.cache_resource
-def get_gemini_model():
-    return genai.GenerativeModel(MODEL_NAME)
+def get_llm_model():
+    if LLM_PROVIDER == "GEMINI":
+        return genai.GenerativeModel(MODEL_NAME_GEMINI)
+    elif LLM_PROVIDER == "GROQ":
+        return Groq(api_key=GROQ_API_KEY)
+    return None # Should not happen due to previous checks
 
-# NOTE: For a real Streamlit app, connecting to a PostgreSQL instance
-# would require it to be accessible from where the app is hosted (e.g., public IP, cloud SQL proxy).
-# For this Colab context and writing app.py, we assume a PostgreSQL instance
-# is somehow accessible. If this app were to be deployed standalone,
-# the database setup would need to be re-evaluated (e.g., SQLite for simplicity, or external PG).
 @st.cache_resource
 def get_db_engine():
     return create_engine("postgresql+psycopg2://postgres:postgres@localhost:5432/miniproject")
 
-model_llm = get_gemini_model()
+llm_model_or_client = get_llm_model()
 db_engine = get_db_engine()
 
 # --- Functions from Notebook (adapted for Streamlit output) ---
@@ -65,8 +82,39 @@ SQL: SELECT divisi, COUNT(nip) FROM employees GROUP BY divisi;
 def generate_sql(question: str) -> str:
     try:
         prompt = build_prompt(question)
-        resp = model_llm.generate_content(prompt)
-        sql = resp.text.strip()
+
+        generation_config = {
+            "temperature": 0, # Controls randomness. Lower values for more deterministic output.
+            "top_k": 40,        # Considers the top_k most likely tokens.
+            "top_p": 0.95       # Considers tokens whose probability sums to top_p.
+        }
+
+        sql = ""
+        if LLM_PROVIDER == "GEMINI":
+            if llm_model_or_client is None:
+                raise RuntimeError("Gemini model not initialized.")
+            resp = llm_model_or_client.generate_content(prompt, generation_config=generation_config)
+            sql = resp.text.strip()
+        elif LLM_PROVIDER == "GROQ":
+            if llm_model_or_client is None:
+                raise RuntimeError("Groq client not initialized.")
+            response = llm_model_or_client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                model=GROQ_MODEL_NAME,
+                temperature=generation_config["temperature"],
+                max_tokens=200,
+                top_p=generation_config["top_p"],
+                stop=None,
+                stream=False,
+            )
+            sql = response.choices[0].message.content.strip()
+
+        # Remove markdown code block fences if present
         if sql.startswith('```sql') and sql.endswith('```'):
             sql = sql[6:-3].strip()
         elif sql.startswith('```') and sql.endswith('```'): # generic markdown code block
@@ -141,7 +189,7 @@ def ask_pipeline(question: str):
         if not validate_sql(sql_valid):
             st.session_state.messages.append({"role": "assistant", "type": "text", "content": "Gagal menghasilkan SQL yang valid setelah coba ulang. Mohon perbaiki pertanyaan atau prompt."})
             return
-    
+
     st.session_state.messages.append({"role": "assistant", "type": "text", "content": f"SQL (valid): {sql_valid}"})
 
     try:
