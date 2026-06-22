@@ -77,6 +77,14 @@ db_engine = get_db_engine()
 # --- Functions from Notebook (adapted for Streamlit output) ---
 
 def build_prompt(question: str) -> str:
+    """
+    Susun prompt yang berisi:
+    - skema database (SCHEMA_STR) agar LLM tahu nama tabel & kolom
+    - instruksi tegas: HANYA balas SATU query PostgreSQL SELECT, tanpa penjelasan
+    - pertanyaan pengguna
+    Boleh tambahkan 1-2 contoh (few-shot) bila perlu.
+    """
+    # TODO 2: lengkapi prompt di bawah
     prompt = f"""
 Anda adalah pakar PostgreSQL. Berdasarkan skema database berikut, hasilkan HANYA SATU query PostgreSQL SELECT yang menjawab pertanyaan pengguna. JANGAN berikan penjelasan atau teks tambahan apa pun.
 
@@ -86,6 +94,8 @@ Skema Database:
 Beberapa Contoh:
 Pertanyaan: Berapa jumlah pegawai per divisi?
 SQL: SELECT divisi, COUNT(nip) FROM employees GROUP BY divisi;
+
+Pertanyaan Pengguna: {question}
 """
     return prompt
 
