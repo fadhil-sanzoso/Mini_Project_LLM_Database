@@ -125,10 +125,13 @@ def generate_sql(question: str) -> str:
             )
             sql = response.choices[0].message.content.strip()
 
-        # Remove markdown code block fences if present
-        if sql.startswith('```sql') and sql.endswith('```'):
+         # Remove markdown code block fences if present safely
+        md_ticks = "`" * 3
+        if sql.startswith(md_ticks + "sql") and sql.endswith(md_ticks):
             sql = sql[6:-3].strip()
-        elif sql.startswith('
+        elif sql.startswith(md_ticks) and sql.endswith(md_ticks):
+            sql = sql[3:-3].strip()
+        return sql
 http://googleusercontent.com/immersive_entry_chip/0
 
 If you are hosting this application directly on Streamlit Community Cloud, you will put those exact lines into the **App secrets** configuration panel via the dashboard settings instead of creating a local file.
