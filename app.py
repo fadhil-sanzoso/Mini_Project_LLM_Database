@@ -132,6 +132,10 @@ def generate_sql(question: str) -> str:
         elif sql.startswith(md_ticks) and sql.endswith(md_ticks):
             sql = sql[3:-3].strip()
         return sql
+
+    except Exception as e:
+        st.session_state.messages.append({"role": "assistant", "type": "error", "content": f"Error generating SQL: {e}"})
+        return ""
 http://googleusercontent.com/immersive_entry_chip/0
 
 If you are hosting this application directly on Streamlit Community Cloud, you will put those exact lines into the **App secrets** configuration panel via the dashboard settings instead of creating a local file.
