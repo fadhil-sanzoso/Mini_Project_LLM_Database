@@ -1,3 +1,4 @@
+%%writefile app.py
 import streamlit as st
 import os, re
 import pandas as pd
@@ -7,11 +8,10 @@ import google.generativeai as genai
 from groq import Groq # Import Groq client
 
 # --- Configuration --- General LLM setup
-# You need to set GEMINI_API_KEY, GROQ_API_KEY, and SUPABASE_DB_URL in Streamlit secrets
+# You need to set GEMINI_API_KEY and GROQ_API_KEY in Streamlit secrets
 # Go to your Streamlit app -> left sidebar -> Settings -> App secrets
 # Add GEMINI_API_KEY = "YOUR_API_KEY"
 # Add GROQ_API_KEY = "YOUR_API_KEY"
-# Add SUPABASE_DB_URL = "postgresql://postgres.xjrdfhzdiukojrvdkagc:[YOUR-PASSWORD]@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 
 # --- LLM Provider Selection ---
 # Choose your desired LLM provider here. This can be made a Streamlit input later if needed.
@@ -125,15 +125,117 @@ def generate_sql(question: str) -> str:
             )
             sql = response.choices[0].message.content.strip()
 
-         # Remove markdown code block fences if present safely
-        md_ticks = "`" * 3
-        if sql.startswith(md_ticks + "sql") and sql.endswith(md_ticks):
+        # Remove markdown code block fences if present
+        if sql.startswith('```sql') and sql.endswith('```'):
             sql = sql[6:-3].strip()
-        elif sql.startswith(md_ticks) and sql.endswith(md_ticks):
+        elif sql.startswith('```') and sql.endswith('```'): # generic markdown code block
             sql = sql[3:-3].strip()
         return sql
-
     except Exception as e:
         st.session_state.messages.append({"role": "assistant", "type": "error", "content": f"Error generating SQL: {e}"})
         return ""
 
+def validate_sql(sql: str) -> bool:
+    if not sql:
+        return False
+    cleaned_sql = sql.strip().lower()
+    if not cleaned_sql.startswith("select"):
+        return False
+    for keyword in FORBIDDEN:
+        if keyword in cleaned_sql:
+            return False
+    if ';' in cleaned_sql[:-1]:
+        return False
+    return True
+
+def run_sql(sql: str) -> pd.DataFrame:
+    with db_engine.connect() as conn:
+        return pd.read_sql(text(sql), conn)
+
+def visualize_results(df: pd.DataFrame):
+    if df.empty:
+        st.session_state.messages.append({"role": "assistant", "type": "text", "content": "Tidak ada data untuk divisualisasikan."})
+        return
+
+    # Check for bar chart: 2 columns, second is numeric
+    if len(df.columns) == 2 and pd.api.types.is_numeric_dtype(df.iloc[:, 1]):
+        st.session_state.messages.append({
+            "role": "assistant",
+            "type": "chart",
+            "chart_type": "bar",
+            "data": df.to_dict('records'), # Store data as dicts for serialization
+            "x_col": df.columns[0],
+            "y_col": df.columns[1]
+        })
+    # Check for line chart: first is datetime, second is numeric
+    elif len(df.columns) >= 2 and pd.api.types.is_datetime64_any_dtype(df.iloc[:, 0]) and pd.api.types.is_numeric_dtype(df.iloc[:, 1]):
+        st.session_state.messages.append({
+            "role": "assistant",
+            "type": "chart",
+            "chart_type": "line",
+            "data": df.to_dict('records'),
+            "x_col": df.columns[0],
+            "y_col": df.columns[1]
+        })
+    else:
+        st.session_state.messages.append({"role": "assistant", "type": "dataframe", "content": df.to_dict('records')})
+
+def ask_pipeline(question: str):
+    st.session_state.messages.append({"role": "user", "type": "text", "content": question})
+
+    sql_raw = generate_sql(question)
+    if not sql_raw:
+        st.session_state.messages.append({"role": "assistant", "type": "text", "content": "Gagal menghasilkan SQL dari pertanyaan Anda."})
+        return
+    st.session_state.messages.append({"role": "assistant", "type": "text", "content": f"SQL (raw): {sql_raw}"})
+
+    sql_valid = sql_raw
+    if not validate_sql(sql_valid):
+        st.session_state.messages.append({"role": "assistant", "type": "text", "content": "SQL tidak valid, mencoba generate ulang..."})
+        sql_valid = generate_sql(question)
+        if not sql_valid:
+            st.session_state.messages.append({"role": "assistant", "type": "text", "content": "Gagal menghasilkan SQL yang valid setelah coba ulang."})
+            return
+        st.session_state.messages.append({"role": "assistant", "type": "text", "content": f"SQL (retry): {sql_valid}"})
+        if not validate_sql(sql_valid):
+            st.session_state.messages.append({"role": "assistant", "type": "text", "content": "Gagal menghasilkan SQL yang valid setelah coba ulang. Mohon perbaiki pertanyaan atau prompt."})
+            return
+
+    st.session_state.messages.append({"role": "assistant", "type": "text", "content": f"SQL (valid): {sql_valid}"})
+
+    try:
+        df_result = run_sql(sql_valid)
+        st.session_state.messages.append({"role": "assistant", "type": "text", "content": "Query berhasil dijalankan."})
+        visualize_results(df_result)
+    except Exception as e:
+        st.session_state.messages.append({"role": "assistant", "type": "error", "content": f"Error saat menjalankan query: {e}. Gagal menjalankan query. Mohon perbaiki pertanyaan atau prompt."})
+        return
+
+# --- Streamlit UI ---
+st.title("Mini Project — Conversational Analytics (Text-to-SQL)")
+st.caption("Human Capital Analytics")
+
+# Initialize chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Display chat messages from history on app rerun
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        if message["type"] == "text":
+            st.write(message["content"])
+        elif message["type"] == "dataframe":
+            df = pd.DataFrame(message["content"])
+            st.dataframe(df)
+        elif message["type"] == "chart":
+            df = pd.DataFrame(message["data"])
+            if message["chart_type"] == "bar":
+                st.bar_chart(df.set_index(message["x_col"]))
+            elif message["chart_type"] == "line":
+                st.line_chart(df.set_index(message["x_col"]))
+        elif message["type"] == "error":
+            st.error(message["content"])
+
+
+if prompt := st.chat_input("Tanyakan sesuatu tentang data Anda..."):
+    ask_pipeline(prompt)
