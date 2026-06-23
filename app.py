@@ -259,3 +259,4 @@ for message in st.session_state.messages:
 
 if prompt := st.chat_input("Tanyakan sesuatu tentang data Anda..."):
     ask_pipeline(prompt)
+    st.rerun()
