@@ -84,9 +84,13 @@ def build_prompt(question: str) -> str:
     - pertanyaan pengguna
     Boleh tambahkan 1-2 contoh (few-shot) bila perlu.
     """
-    # TODO 2: lengkapi prompt di bawah
     prompt = f"""
 Anda adalah pakar PostgreSQL. Berdasarkan skema database berikut, hasilkan HANYA SATU query PostgreSQL SELECT yang menjawab pertanyaan pengguna. JANGAN berikan penjelasan atau teks tambahan apa pun.
+
+Aturan Penting:
+1. Untuk pencarian berdasarkan teks/nama (string), SELALU gunakan ILIKE '%keyword%' agar tidak case-sensitive dan bisa menoleransi sebagian salah ketik (typo). JANGAN gunakan operator '=' untuk filter teks.
+2. Jika ada filter status 'berjalan' pada enrollments, ingat bahwa field nilai bisa berisi NULL.
+3. Gunakan JOIN yang tepat jika pertanyaan membutuhkan data dari lebih dari satu tabel.
 
 Skema Database:
 {SCHEMA_STR}
@@ -95,7 +99,14 @@ Beberapa Contoh:
 Pertanyaan: Berapa jumlah pegawai per divisi?
 SQL: SELECT divisi, COUNT(nip) FROM employees GROUP BY divisi;
 
+Pertanyaan: siapa pegawai yang namanya agus?
+SQL: SELECT nama, divisi, jabatan FROM employees WHERE nama ILIKE '%agus%';
+
+Pertanyaan: tampilkan nilai diklat cloud untuk budi
+SQL: SELECT e.nama, t.nama_diklat, en.nilai FROM employees e JOIN enrollments en ON e.nip = en.nip JOIN trainings t ON en.training_id = t.training_id WHERE e.nama ILIKE '%budi%' AND t.nama_diklat ILIKE '%cloud%';
+
 Pertanyaan Pengguna: {question}
+SQL: 
 """
     return prompt
 
